@@ -68,7 +68,7 @@ def get_variance(df1,df2,col_name):
 def getStackfeature(train_data_A,train_data_B,pred_data,cat_cols):#把A作为验证集
     params= { 
                'objective':'binary',
-          'metric':'auc', 
+          'metric':'binary_error', 
           'learning_rate':0.05, 
           'bagging_fraction':0.8, 
           'bagging_freq':3, 
