@@ -199,7 +199,7 @@ def getStackfeature(train_data_A,train_data_B,pred_data,cat_cols):#把A作为验
 def add_sample(topred_y,df_data,threshold):
     df_data_add = df_data.copy()
     df_data_add['res'] = topred_y
-    df_data_add = df_data_add[df_data_add[res]>threshold]
+    df_data_add = df_data_add[df_data_add['res']>threshold]
     df_data_add['label'] = 1
     df_data_add.drop('res',axis=1,inplace=True)
     return df_data_add
