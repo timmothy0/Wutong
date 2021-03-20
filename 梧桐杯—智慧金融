@@ -18,3 +18,278 @@ import warnings
 warnings.filterwarnings("ignore")
 from imblearn.over_sampling import SMOTE
 from sklearn.model_selection import GridSearchCV
+
+
+path = './input/'
+df_data_a = pd.read_csv(path+'data_a.csv')
+df_train_label = pd.read_csv(path+'train_label.csv')
+df_to_pred_a = pd.read_csv(path+'to_pred_a.csv')
+df_data_b = pd.read_csv(path+'data_b.csv')
+df_to_pred_b = pd.read_csv(path+'to_pred_b.csv')
+
+df_data_a = df_data_a.replace('\\N',np.nan)
+df_data_b = df_data_b.replace('\\N',np.nan)
+msno.bar(df_data_a)
+#查看缺失值
+df_data_a.drop('if_group',axis=1,inplace = True)
+df_data_b.drop('if_group',axis=1,inplace=True)
+#缺失值过大直接删除
+df_data_a = pd.merge(df_data_a,df_train_label,on='phone',how='outer')
+df_data_b = pd.merge(df_data_b,df_to_pred_b,on='phone',how = 'outer')
+#合并训练数据和标签
+cat_cols = ['if_family','sms_inpkg_ind']
+df_data_a[cat_cols] = df_data_a[cat_cols].astype('category')
+df_data_b[cat_cols] = df_data_b[cat_cols].astype('category')
+#两个特征适合做分类变量
+
+def get_col_name(col_name):
+    for i in df_data_a.columns:
+    #     print(df_data_a[i].dtype)
+        if (df_data_a[i].dtype == 'object')& (i !='phone'):
+            col_name.append(i)
+    return col_name
+#寻找type是object 做后续转换处理
+def getnum_Nan(df):
+    df_temp = df.drop(['phone','month','label'],axis=1)
+    num_nan = np.sum(df_temp.isna(),axis=1)
+    df['num_nan'] = num_nan
+    return df
+#统计每个用户nan值之和
+def get_variance(df1,df2,col_name):
+    df_temp = pd.DataFrame()
+    df_temp['phone'] = df1['phone'].tolist()
+    for colname in col_name:
+        df_temp[colname+'_var']=df2[colname].values-df1[colname].values
+    return df_temp
+#每个用户有两条数据 做差
+def getStackfeature(train_data_A,train_data_B,pred_data,cat_cols):#把A作为验证集
+    params= { 
+               'objective':'binary',
+          'metric':'auc', 
+          'learning_rate':0.05, 
+          'bagging_fraction':0.8, 
+          'bagging_freq':3, 
+          'feature_fraction':0.8,
+          'num_iterations': 8000,
+          'silent':True
+                }
+    
+    seed = 2020
+    n_split=5
+    num_round=10000
+    
+    sk =StratifiedKFold(n_splits = n_split,shuffle = True,random_state=seed)
+    train_data_A = train_data_A.drop(['phone','month'],axis=1)
+    train_data_B = train_data_B.drop(['phone','month'],axis=1)
+    train_data_A['cato'] = 0
+    train_data_B['cato'] = 1
+    pred_data['cato'] = 0
+    test_x = pred_data.drop(['phone','label','month'],axis=1)
+ 
+    
+    train_user = pd.Series()
+    test_user = np.zeros(test_x.shape[0])
+    for train,test in sk.split(train_data_A.drop(['label'],axis=1),train_data_A['label']):
+        x_train = pd.concat([train_data_A.drop('label',axis=1).iloc[train],train_data_B.drop('label',axis=1).iloc[train]],axis=0)
+        x_test = train_data_A.drop('label',axis=1).iloc[test]
+        y_train = pd.concat([train_data_A['label'].iloc[train],train_data_B['label'].iloc[train]],axis=0)
+        y_test = train_data_A['label'].iloc[test]
+        
+        trn_data = lgb.Dataset(x_train,y_train)
+        val_data = lgb.Dataset(x_test,y_test)
+        model = lgb.train(params
+                          ,trn_data
+                    ,num_round
+                    ,valid_sets = [trn_data, val_data]
+                    ,verbose_eval=500
+                    ,early_stopping_rounds = 200
+                    ,categorical_feature=cat_cols)
+        train_user = train_user.append(pd.Series(model.predict(x_test),index=test))
+        test_user += model.predict(test_x)/n_split
+    return train_user,test_user    
+#嫁接学习(引导学习) 13月份分布类似 将12月份拼接作为训练集 以1月份的数据作为验证集 更大程度提升拟合效果 用训练后的模型分别预测 13 月份的概率值
+  
+    def Kfold_topred(params,train_data,pred_data,model_name):
+    f1_test = 0
+    n_split = 5
+    pscore_test = 0
+    rscore_test = 0
+    threshold = 0
+    seed=2020
+    num_round = 8000
+    sk = StratifiedKFold(n_splits = n_split,shuffle = True,random_state=seed)
+    
+    test_prob = pd.DataFrame()
+    test_prob['phone'] = train_data['phone']
+    test_prob['prob'] = np.zeros(train_data.shape[0])
+    train_forx = train_data.drop(['phone','label','month'],axis=1)
+    train_fory = train_data['label']
+    topred_x = pred_data.drop(['phone','label','month'],axis=1)
+    topred_y = np.zeros(pred_data.shape[0])
+    
+    feature_importance = np.zeros(train_forx.shape[1])
+    if model_name =='lightgbm':
+        for train,test in sk.split(train_forx,train_fory):
+         
+            x_train = train_forx.iloc[train]
+            y_train = train_fory.iloc[train]
+            x_test = train_forx.iloc[test]
+            y_test = train_fory.iloc[test]
+
+            trn_data = lgb.Dataset(x_train,y_train)
+            val_data = lgb.Dataset(x_test,y_test)
+
+            model = lgb.train(
+                          params
+                        ,trn_data
+                        ,num_round
+                        ,valid_sets = [trn_data, val_data]
+                        ,verbose_eval=500
+                        ,early_stopping_rounds = 200
+                        ,categorical_feature=cat_cols
+                                    )
+            test_prob['prob'].iloc[test]= model.predict(x_test)
+            pred_result = pd.DataFrame(model.predict(x_test),columns=['res'])
+            pred_result['res'] = pred_result['res'].map(lambda x:1 if x>0.5 else 0)
+            f1_test += f1_score(y_test,np.array(pred_result['res']))/n_split#测试集f1
+            pscore_test += precision_score(y_test,np.array(pred_result['res']))/n_split#测试集p值
+            rscore_test += recall_score(y_test,np.array(pred_result['res']))/n_split#测试集r值
+
+            topred_y += model.predict(topred_x,num_iteration = model.best_iteration)/n_split#预测结果
+
+            feature_importance += model.feature_importance()/n_split
+            
+        feature_name = model.feature_name()
+            
+#     elif model_name == 'xgboost':
+
+#         for train,test in sk.split(train_forx,train_fory):
+#             x_train = train_forx.iloc[train]
+#             y_train = train_fory.iloc[train]
+#             x_test = train_forx.iloc[test]
+#             y_test = train_fory.iloc[test]
+
+#             trn_data = xgb.DMatrix(x_train,label = y_train,enable_categorical=True)
+#             val_data = xgb.DMatrix(x_test, label = y_test,enable_categorical=True)
+#             watchlist = [(trn_data, 'train'), (val_data, 'valid')]
+
+#             model = xgb.train(params, trn_data, num_round, watchlist, verbose_eval=500, early_stopping_rounds=200)
+
+#             pred_result = pd.DataFrame(model.predict(xgb.DMatrix(x_test,enable_categorical=True)),columns=['res'])
+#             pred_result['res'] = pred_result['res'].map(lambda x:1 if x>0.5 else 0)
+
+
+#             f1_test += f1_score(y_test,np.array(pred_result['res']))/n_split#测试集f1
+#             pscore_test += precision_score(y_test,np.array(pred_result['res']))/n_split#测试集p值
+#             rscore_test += recall_score(y_test,np.array(pred_result['res']))/n_split#测试集r值
+
+#             topred_y += model.predict(xgb.DMatrix(topred_x,enable_categorical=True),ntree_limit=model.best_ntree_limit)/n_split#预测结果
+
+# #             feature_importance += model.get_fscore().values()/n_split
+
+#         feature_name = model.get_fscore().keys()
+    
+    
+    
+    test_prob = test_prob['prob'].tolist()
+    print('f1_test=',f1_test)
+    print('pscore_test=',pscore_test)
+    print('rscore_test=',rscore_test)
+    return f1_test,pscore_test,rscore_test,feature_importance,feature_name,topred_y,test_prob
+#k折交叉验证
+
+def add_sample(topred_y,df_data,threshold):
+    df_data_add = df_data.copy()
+    df_data_add['res'] = topred_y
+    df_data_add = df_data_add[df_data_add[res]>threshold]
+    df_data_add['label'] = 1
+    df_data_add.drop('res',axis=1,inplace=True)
+    return df_data_add
+#运用伪标签技术 提升模型效果
+def save_res(topred_y):
+    df_result = df_data_b_3[['phone','label']]
+
+    df_result['label'] = topred_y
+    df_result['label'] = df_result['label'].map(lambda x:1 if x>0.5 else 0)
+
+    df_result = df_result.reset_index().drop('index',axis=1)
+    df_result.index = df_result['phone']
+
+    df_result=df_result.drop('phone',axis=1)
+    return df_result
+    
+col_name = []
+col_name = get_col_name(col_name)
+df_data_a[col_name] = df_data_a[col_name].astype(float)
+df_data_b[col_name] = df_data_b[col_name].astype(float)
+
+df_data_a_1 = df_data_a[df_data_a['month']==202001]
+df_data_a_2 = df_data_a[df_data_a['month']==202002]
+df_data_a_3 = df_data_a[df_data_a['month']==202003]
+df_data_a_4 = df_data_a[df_data_a['month']==202004]
+df_data_b_3 = df_data_b[df_data_b['month']==202003]
+df_data_b_4 = df_data_b[df_data_b['month']==202004]
+
+df_data_a_1 = getnum_Nan(df_data_a_1)
+df_data_a_2 = getnum_Nan(df_data_a_2)
+df_data_a_3 = getnum_Nan(df_data_a_3)
+df_data_a_4 = getnum_Nan(df_data_a_4)
+df_data_b_3 = getnum_Nan(df_data_b_3)
+df_data_b_4 = getnum_Nan(df_data_b_4)
+
+col_float = ['gprs_fee','overrun_flux_fee','out_actvcall_dur','actvcall_fee',
+             'out_activcall_fee','monfix_fee','gift_acct_amt','call_cnt',
+             'up_flux',
+             'down_flux','p2psms_up_cnt','p2psms_cmnct_fee',
+             'p2psms_pkg_fee',
+             'num_nan']
+df_var_12 = get_variance(df_data_a_1,df_data_a_2,col_float)
+df_var_34 = get_variance(df_data_a_3,df_data_a_4,col_float)
+df_bvar_34 =get_variance(df_data_b_3,df_data_b_4,col_float)
+
+df_data_a_1 = pd.merge(df_data_a_1,df_var_12,on='phone')
+df_data_a_2 = pd.merge(df_data_a_2,df_var_12,on='phone')
+df_data_a_3 = pd.merge(df_data_a_3,df_var_34,on='phone')
+df_data_a_4 = pd.merge(df_data_a_4,df_var_34,on='phone')
+df_data_b_3 = pd.merge(df_data_b_3,df_bvar_34,on='phone')
+df_data_b_4 = pd.merge(df_data_b_4,df_bvar_34,on='phone')
+
+cato_col = ['if_family','sms_inpkg_ind','cato']
+train_user,test_user_a = getStackfeature(df_data_a_1,df_data_a_2,df_data_a_3,cato_col)
+train_user,test_user_b = getStackfeature(df_data_a_1,df_data_a_2,df_data_b_3,cato_col)
+df_data_a_1['from2prob'] = train_user
+df_data_a_3['from2prob'] = test_user_a
+df_data_b_3['from2prob'] = test_user_b
+
+params_lgb_for13= { 
+               'objective':'binary',
+          'metric':'auc', 
+          'learning_rate':0.05, 
+          'bagging_fraction':0.8, 
+          'bagging_freq':3, 
+          'feature_fraction':0.8,
+          'num_iterations': 8000,
+          'silent':True
+                }
+'''params_lgb_for24 = { 
+               'objective':'binary',
+          'metric':'auc', 
+          'learning_rate':0.05, 
+          'bagging_fraction':0.8, 
+          'bagging_freq':3, 
+          'feature_fraction':0.8,
+          'num_iterations': 8000,
+          'silent':True
+                }'''
+#比赛时发现用auc训练 24月份效果比较好 但是线上用24月份的数据 分数下滑严重 所以弃用了
+
+f1_test,pscore_test,rscore_test,feat_imp,feat_name,topred_y,test_prob= Kfold_topred(params_lgb_for13,df_data_a_1,df_data_a_3,'lightgbm')
+df_data_add = add_sample(topred_y,df_data_a_3,0.9)
+df_data_a13 = pd.concat([df_data_a_1,df_data_add],axis=0)
+f1_test,pscore_test,rscore_test,feat_imp,feat_name,topred_y,test_prob= Kfold_topred(params_lgb_for13,df_data_a13,df_data_b_3,'lightgbm')
+df_data_add = add_sample(topred_y,df_data_b_3,0.9)
+df_data_addb3 = pd.concat([df_data_adda3,df_data_add],axis=0)
+f1_test,pscore_test,rscore_test,feat_imp,feat_name,topred_y,test_prob= Kfold_topred(params_lgb_for13,df_data_b3,df_data_b_3,'lightgbm')
+
+df_result = save_res(topred_y)
+df_result.to_csv('./output/'+'res.csv')
