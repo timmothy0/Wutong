@@ -42,19 +42,21 @@ df_data_a[cat_cols] = df_data_a[cat_cols].astype('category')
 df_data_b[cat_cols] = df_data_b[cat_cols].astype('category')
 #两个特征适合做分类变量
 
-def get_col_name(col_name):
+def get_col_name(col_name,df_data_a,df_data_b):
     for i in df_data_a.columns:
     #     print(df_data_a[i].dtype)
         if (df_data_a[i].dtype == 'object')& (i !='phone'):
             col_name.append(i)
     return col_name
 #寻找type是object 做后续转换处理
+
 def getnum_Nan(df):
     df_temp = df.drop(['phone','month','label'],axis=1)
     num_nan = np.sum(df_temp.isna(),axis=1)
     df['num_nan'] = num_nan
     return df
 #统计每个用户nan值之和
+
 def get_variance(df1,df2,col_name):
     df_temp = pd.DataFrame()
     df_temp['phone'] = df1['phone'].tolist()
@@ -62,6 +64,7 @@ def get_variance(df1,df2,col_name):
         df_temp[colname+'_var']=df2[colname].values-df1[colname].values
     return df_temp
 #每个用户有两条数据 做差
+
 def getStackfeature(train_data_A,train_data_B,pred_data,cat_cols):#把A作为验证集
     params= { 
                'objective':'binary',
@@ -73,7 +76,6 @@ def getStackfeature(train_data_A,train_data_B,pred_data,cat_cols):#把A作为验
           'num_iterations': 8000,
           'silent':True
                 }
-    
     seed = 2020
     n_split=5
     num_round=10000
@@ -85,7 +87,6 @@ def getStackfeature(train_data_A,train_data_B,pred_data,cat_cols):#把A作为验
     train_data_B['cato'] = 1
     pred_data['cato'] = 0
     test_x = pred_data.drop(['phone','label','month'],axis=1)
- 
     
     train_user = pd.Series()
     test_user = np.zeros(test_x.shape[0])
@@ -188,9 +189,6 @@ def getStackfeature(train_data_A,train_data_B,pred_data,cat_cols):#把A作为验
 # #             feature_importance += model.get_fscore().values()/n_split
 
 #         feature_name = model.get_fscore().keys()
-    
-    
-    
     test_prob = test_prob['prob'].tolist()
     print('f1_test=',f1_test)
     print('pscore_test=',pscore_test)
@@ -206,15 +204,13 @@ def add_sample(topred_y,df_data,threshold):
     df_data_add.drop('res',axis=1,inplace=True)
     return df_data_add
 #运用伪标签技术 提升模型效果
+
 def save_res(topred_y):
     df_result = df_data_b_3[['phone','label']]
-
     df_result['label'] = topred_y
     df_result['label'] = df_result['label'].map(lambda x:1 if x>0.5 else 0)
-
     df_result = df_result.reset_index().drop('index',axis=1)
     df_result.index = df_result['phone']
-
     df_result=df_result.drop('phone',axis=1)
     return df_result
     
@@ -263,7 +259,7 @@ df_data_b_3['from2prob'] = test_user_b
 
 params_lgb_for13= { 
                'objective':'binary',
-          'metric':'auc', 
+          'metric':'binary_error', 
           'learning_rate':0.05, 
           'bagging_fraction':0.8, 
           'bagging_freq':3, 
