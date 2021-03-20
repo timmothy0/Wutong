@@ -6,7 +6,7 @@ Knowledge learned during this competition as following:
 
 2.how to deal with unbalanced data
 
-3.adjusting threshold works!(But I didn't do that...)
+3.adjusting threshold works!(but I didn't do that...)
 
 4.stacking feature learned from kaggle
 
